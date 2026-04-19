@@ -4,8 +4,83 @@ body {
     color: #e0e0e0;
     margin: 0;
     padding: 2rem;
+    max-width: 1100px;
+    margin-left: auto;
+    margin-right: auto;
 }
 
 h1 {
     color: #e8c547;
+    margin-top: 0;
+}
+
+h2 {
+    color: #b8d8a8;
+    font-size: 1.1rem;
+    margin-bottom: 0.4rem;
+    margin-top: 1.2rem;
+}
+
+.header p {
+    margin: 0;
+    opacity: 0.7;
+    font-family: monospace;
+}
+
+.players ul,
+.events ul,
+.legal ul {
+    list-style: none;
+    padding-left: 0;
+    margin-top: 0;
+}
+
+.players li {
+    font-family: monospace;
+    padding: 2px 0;
+}
+
+.draw p {
+    margin: 4px 0;
+    opacity: 0.75;
+}
+
+.actions {
+    margin: 1rem 0;
+}
+
+button {
+    background: #2d2d4a;
+    color: #e0e0e0;
+    border: 1px solid #3d3d5a;
+    border-radius: 4px;
+    padding: 6px 12px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    font-family: inherit;
+}
+
+button:hover:not(:disabled) {
+    background: #3d3d5a;
+}
+
+button:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+}
+
+.legal li {
+    margin: 2px 0;
+}
+
+.legal button {
+    font-family: monospace;
+    font-size: 0.8rem;
+    text-align: left;
+    width: 100%;
+    max-width: 360px;
+}
+
+.events li {
+    padding: 2px 0;
 }

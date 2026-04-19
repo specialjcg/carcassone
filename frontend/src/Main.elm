@@ -7,6 +7,8 @@ import Html.Events exposing (onClick)
 import Http
 import Json.Decode as D exposing (Decoder)
 import Json.Encode as E
+import Svg exposing (Svg)
+import Svg.Attributes as SA
 
 
 
@@ -629,8 +631,24 @@ viewCurrentDraw v =
         Just spec ->
             div [ class "draw" ]
                 [ h2 [] [ text "Current draw" ]
-                , p [] [ text (describeTile spec) ]
+                , viewDrawSvg spec
+                , p [ style "font-family" "monospace", style "font-size" "0.85em" ]
+                    [ text (describeTile spec) ]
                 ]
+
+
+viewDrawSvg : TileSpec -> Svg Msg
+viewDrawSvg spec =
+    let
+        pt =
+            { spec = spec, rotation = 0 }
+    in
+    Svg.svg
+        [ SA.viewBox "-4 -4 88 88"
+        , SA.width "100"
+        , SA.style "display:block"
+        ]
+        (renderTile pt False)
 
 
 describeTile : TileSpec -> String
@@ -671,17 +689,365 @@ edgeChar e =
 
 viewBoard : GameView -> Html Msg
 viewBoard v =
-    div [ class "board-text" ]
-        [ h2 [] [ text "Board" ]
-        , p []
+    div [ class "board" ]
+        [ h2 []
             [ text
-                (String.fromInt (List.length v.board.cells)
+                ("Board — "
+                    ++ String.fromInt (List.length v.board.cells)
                     ++ " tiles, "
                     ++ String.fromInt (List.length v.board.meeples)
-                    ++ " meeples on board"
+                    ++ " meeples"
                 )
             ]
+        , viewBoardSvg v.board
         ]
+
+
+
+-- BOARD SVG
+
+
+tileSize : Int
+tileSize =
+    80
+
+
+type alias Bounds =
+    { minX : Int, maxX : Int, minY : Int, maxY : Int }
+
+
+computeBounds : List CellView -> Bounds
+computeBounds cells =
+    case cells of
+        [] ->
+            { minX = 0, maxX = 0, minY = 0, maxY = 0 }
+
+        first :: rest ->
+            let
+                ( fx, fy ) =
+                    first.pos
+
+                fold cell acc =
+                    let
+                        ( x, y ) =
+                            cell.pos
+                    in
+                    { minX = Basics.min acc.minX x
+                    , maxX = Basics.max acc.maxX x
+                    , minY = Basics.min acc.minY y
+                    , maxY = Basics.max acc.maxY y
+                    }
+            in
+            List.foldl fold { minX = fx, maxX = fx, minY = fy, maxY = fy } rest
+
+
+viewBoardSvg : BoardView -> Svg Msg
+viewBoardSvg board =
+    let
+        b =
+            computeBounds board.cells
+
+        pad =
+            tileSize
+
+        x0 =
+            b.minX * tileSize - pad
+
+        y0 =
+            -b.maxY * tileSize - pad
+
+        w =
+            (b.maxX - b.minX + 1) * tileSize + 2 * pad
+
+        h =
+            (b.maxY - b.minY + 1) * tileSize + 2 * pad
+
+        viewBoxStr =
+            String.join " " (List.map String.fromInt [ x0, y0, w, h ])
+    in
+    Svg.svg
+        [ SA.viewBox viewBoxStr
+        , SA.width "800"
+        , SA.style "background:#0f1226;border-radius:6px;display:block"
+        ]
+        (List.map (viewCell board.lastPlaced) board.cells
+            ++ List.map viewMeeple board.meeples
+        )
+
+
+viewCell : Maybe Pos -> CellView -> Svg Msg
+viewCell lastPlaced cell =
+    let
+        ( x, y ) =
+            cell.pos
+
+        tx =
+            x * tileSize
+
+        ty =
+            -y * tileSize
+
+        isLast =
+            lastPlaced == Just cell.pos
+    in
+    Svg.g
+        [ SA.transform ("translate(" ++ String.fromInt tx ++ " " ++ String.fromInt ty ++ ")") ]
+        (renderTile cell.tile isLast)
+
+
+renderTile : PlacedTile -> Bool -> List (Svg Msg)
+renderTile pt isLast =
+    let
+        bg =
+            Svg.rect
+                [ SA.x "0", SA.y "0", SA.width "80", SA.height "80", SA.fill "#a7d397" ]
+                []
+
+        cities =
+            List.filterMap (cityShapeFor pt) [ North, East, South, West ]
+
+        roads =
+            List.filterMap (roadShapeFor pt) [ North, East, South, West ]
+
+        monasterySvg =
+            if pt.spec.monastery then
+                [ monasteryShape ]
+
+            else
+                []
+
+        shieldSvg =
+            if pt.spec.shield then
+                [ shieldShape ]
+
+            else
+                []
+
+        border =
+            Svg.rect
+                [ SA.x "0"
+                , SA.y "0"
+                , SA.width "80"
+                , SA.height "80"
+                , SA.fill "none"
+                , SA.stroke
+                    (if isLast then
+                        "#e8c547"
+
+                     else
+                        "#222"
+                    )
+                , SA.strokeWidth
+                    (if isLast then
+                        "3"
+
+                     else
+                        "1"
+                    )
+                ]
+                []
+    in
+    [ bg ] ++ cities ++ roads ++ monasterySvg ++ shieldSvg ++ [ border ]
+
+
+cityShapeFor : PlacedTile -> Side -> Maybe (Svg Msg)
+cityShapeFor pt side =
+    if effectiveEdge pt side == City then
+        Just
+            (Svg.polygon
+                [ SA.points (cityPolygonPoints side)
+                , SA.fill "#6b4226"
+                , SA.stroke "#3b2415"
+                , SA.strokeWidth "0.5"
+                ]
+                []
+            )
+
+    else
+        Nothing
+
+
+cityPolygonPoints : Side -> String
+cityPolygonPoints side =
+    case side of
+        North ->
+            "0,0 80,0 40,40"
+
+        East ->
+            "80,0 80,80 40,40"
+
+        South ->
+            "0,80 80,80 40,40"
+
+        West ->
+            "0,0 0,80 40,40"
+
+
+roadShapeFor : PlacedTile -> Side -> Maybe (Svg Msg)
+roadShapeFor pt side =
+    if effectiveEdge pt side == Road then
+        let
+            ( x1, y1 ) =
+                edgeMidpoint side
+        in
+        Just
+            (Svg.line
+                [ SA.x1 (String.fromInt x1)
+                , SA.y1 (String.fromInt y1)
+                , SA.x2 "40"
+                , SA.y2 "40"
+                , SA.stroke "#3a3a3a"
+                , SA.strokeWidth "5"
+                , SA.strokeLinecap "round"
+                ]
+                []
+            )
+
+    else
+        Nothing
+
+
+edgeMidpoint : Side -> ( Int, Int )
+edgeMidpoint side =
+    case side of
+        North ->
+            ( 40, 0 )
+
+        East ->
+            ( 80, 40 )
+
+        South ->
+            ( 40, 80 )
+
+        West ->
+            ( 0, 40 )
+
+
+monasteryShape : Svg Msg
+monasteryShape =
+    Svg.g []
+        [ Svg.rect
+            [ SA.x "28", SA.y "30", SA.width "24", SA.height "24"
+            , SA.fill "#fff", SA.stroke "#222", SA.strokeWidth "1"
+            ]
+            []
+        , Svg.line
+            [ SA.x1 "40", SA.y1 "20", SA.x2 "40", SA.y2 "32"
+            , SA.stroke "#222", SA.strokeWidth "2"
+            ]
+            []
+        , Svg.line
+            [ SA.x1 "35", SA.y1 "24", SA.x2 "45", SA.y2 "24"
+            , SA.stroke "#222", SA.strokeWidth "2"
+            ]
+            []
+        ]
+
+
+shieldShape : Svg Msg
+shieldShape =
+    Svg.circle
+        [ SA.cx "62", SA.cy "18", SA.r "6"
+        , SA.fill "#e8c547", SA.stroke "#222", SA.strokeWidth "1"
+        ]
+        []
+
+
+viewMeeple : ActiveMeeple -> Svg Msg
+viewMeeple m =
+    let
+        ( x, y ) =
+            m.pos
+
+        tx =
+            x * tileSize
+
+        ty =
+            -y * tileSize
+
+        ( mx, my ) =
+            meeplePosition m.on
+
+        color =
+            playerColor m.owner
+    in
+    Svg.circle
+        [ SA.cx (String.fromInt (tx + mx))
+        , SA.cy (String.fromInt (ty + my))
+        , SA.r "8"
+        , SA.fill color
+        , SA.stroke "#000"
+        , SA.strokeWidth "1.5"
+        ]
+        []
+
+
+meeplePosition : MeepleChoice -> ( Int, Int )
+meeplePosition c =
+    case c of
+        OnMonastery ->
+            ( 40, 42 )
+
+        OnSegment side ->
+            case side of
+                North ->
+                    ( 40, 14 )
+
+                East ->
+                    ( 66, 40 )
+
+                South ->
+                    ( 40, 66 )
+
+                West ->
+                    ( 14, 40 )
+
+
+playerColor : Int -> String
+playerColor i =
+    case i of
+        0 ->
+            "#e74c3c"
+
+        1 ->
+            "#3498db"
+
+        2 ->
+            "#2ecc71"
+
+        3 ->
+            "#f1c40f"
+
+        _ ->
+            "#9b59b6"
+
+
+effectiveEdge : PlacedTile -> Side -> EdgeKind
+effectiveEdge pt side =
+    let
+        canonical =
+            (sideToInt side - pt.rotation + 4) |> modBy 4
+    in
+    pt.spec.edges
+        |> List.drop canonical
+        |> List.head
+        |> Maybe.withDefault Field
+
+
+sideToInt : Side -> Int
+sideToInt s =
+    case s of
+        North ->
+            0
+
+        East ->
+            1
+
+        South ->
+            2
+
+        West ->
+            3
 
 
 viewActions : GameState -> Html Msg
