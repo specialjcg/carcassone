@@ -1,0 +1,13 @@
+{
+  "name": "carcassonne-frontend",
+  "version": "0.1.0",
+  "scripts": {
+    "build": "elm make src/Main.elm --output=static/elm.js",
+    "dev": "elm make src/Main.elm --output=static/elm.js --debug",
+    "test": "elm-test"
+  },
+  "devDependencies": {
+    "elm": "^0.19.1-5",
+    "elm-test": "^0.19.1"
+  }
+}
