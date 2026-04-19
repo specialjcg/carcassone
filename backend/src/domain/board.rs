@@ -1,6 +1,9 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
-use crate::domain::feature::FeatureGraph;
+use crate::domain::feature::{FeatureGraph, MeepleError, PlayerId, SegmentRef};
+use crate::domain::scoring::{
+    score_completed_feature, score_completed_monastery, ScoringEvent,
+};
 use crate::domain::tile::{edges_match, PlacedTile, Side};
 
 pub type Pos = (i32, i32);
@@ -12,10 +15,26 @@ pub enum PlacementError {
     EdgeMismatch(Side),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MeeplePlaceError {
+    NoTileJustPlaced,
+    SegmentNotOnLastTile,
+    NoMonasteryHere,
+    Feature(MeepleError),
+}
+
+#[derive(Debug, Clone)]
+pub struct MonasteryRecord {
+    pub owner: Option<PlayerId>,
+    pub neighbor_count: u8,
+}
+
 #[derive(Debug, Default)]
 pub struct Board {
     tiles: HashMap<Pos, PlacedTile>,
     pub features: FeatureGraph,
+    monasteries: HashMap<Pos, MonasteryRecord>,
+    last_placed: Option<Pos>,
 }
 
 impl Board {
@@ -79,9 +98,119 @@ impl Board {
                 .find(|(s, _)| *s == side)
                 .map(|(_, seg)| *seg)
         });
+        if tile.spec.monastery {
+            let initial_neighbors = chebyshev_offsets()
+                .iter()
+                .filter(|d| self.tiles.contains_key(&(pos.0 + d.0, pos.1 + d.1)))
+                .count() as u8;
+            self.monasteries.insert(
+                pos,
+                MonasteryRecord {
+                    owner: None,
+                    neighbor_count: initial_neighbors,
+                },
+            );
+        }
+        for d in chebyshev_offsets() {
+            let npos = (pos.0 + d.0, pos.1 + d.1);
+            if let Some(rec) = self.monasteries.get_mut(&npos) {
+                rec.neighbor_count += 1;
+            }
+        }
         self.tiles.insert(pos, tile);
+        self.last_placed = Some(pos);
         Ok(())
     }
+
+    pub fn place_meeple_on_segment(
+        &mut self,
+        side: Side,
+        owner: PlayerId,
+    ) -> Result<(), MeeplePlaceError> {
+        let pos = self.last_placed.ok_or(MeeplePlaceError::NoTileJustPlaced)?;
+        let tile = self.tiles.get(&pos).expect("last_placed must point to a tile");
+        let sid = tile.segment_id(side);
+        self.features
+            .place_meeple((pos, sid), owner)
+            .map_err(MeeplePlaceError::Feature)
+    }
+
+    pub fn place_meeple_on_monastery(
+        &mut self,
+        owner: PlayerId,
+    ) -> Result<(), MeeplePlaceError> {
+        let pos = self.last_placed.ok_or(MeeplePlaceError::NoTileJustPlaced)?;
+        let rec = self
+            .monasteries
+            .get_mut(&pos)
+            .ok_or(MeeplePlaceError::NoMonasteryHere)?;
+        if rec.owner.is_some() {
+            return Err(MeeplePlaceError::Feature(MeepleError::FeatureOccupied));
+        }
+        rec.owner = Some(owner);
+        Ok(())
+    }
+
+    pub fn resolve_scoring(&mut self) -> Vec<ScoringEvent> {
+        let mut events = Vec::new();
+        let pos = match self.last_placed {
+            Some(p) => p,
+            None => return events,
+        };
+        let tile = self.tiles.get(&pos).expect("last placed must exist").clone();
+
+        // Score features touching the just-placed tile (each unique root scored once).
+        let mut seen_roots: HashSet<SegmentRef> = HashSet::new();
+        for side in Side::all() {
+            let sid = tile.segment_id(side);
+            let root = self.features.find((pos, sid));
+            if !seen_roots.insert(root) {
+                continue;
+            }
+            if !self.features.is_complete(root) {
+                continue;
+            }
+            let info = self.features.info(root);
+            if let Some(ev) = score_completed_feature(&info) {
+                self.features.collect_meeples(root);
+                events.push(ev);
+            }
+        }
+
+        // Score completed monasteries at pos and the 8 surrounding cells.
+        let mut to_check: Vec<Pos> = chebyshev_offsets()
+            .iter()
+            .map(|d| (pos.0 + d.0, pos.1 + d.1))
+            .collect();
+        to_check.push(pos);
+        for mpos in to_check {
+            let owner = match self.monasteries.get(&mpos) {
+                Some(rec) if rec.owner.is_some() && rec.neighbor_count == 8 => rec.owner.unwrap(),
+                _ => continue,
+            };
+            events.push(score_completed_monastery(owner));
+            // Mark monastery as scored by clearing its owner so it won't re-score.
+            self.monasteries.get_mut(&mpos).unwrap().owner = None;
+        }
+
+        events
+    }
+
+    pub fn last_placed(&self) -> Option<Pos> {
+        self.last_placed
+    }
+
+    pub fn monastery(&self, pos: Pos) -> Option<&MonasteryRecord> {
+        self.monasteries.get(&pos)
+    }
+}
+
+fn chebyshev_offsets() -> [(i32, i32); 8] {
+    [
+        (-1, -1), (0, -1), (1, -1),
+        (-1, 0),           (1, 0),
+        (-1, 1),  (0, 1),  (1, 1),
+    ]
 }
 
 pub fn offset(pos: Pos, side: Side) -> Pos {
@@ -207,5 +336,103 @@ mod tests {
         assert_eq!(r0, r1);
         let info = board.features.info(((0, 0), 0));
         assert_eq!(info.tiles, 2);
+    }
+
+    fn road_end() -> TileSpec {
+        TileSpec {
+            edges: [EdgeKind::Road, EdgeKind::Field, EdgeKind::Field, EdgeKind::Field],
+            segments: [0, 1, 1, 1],
+            monastery: false,
+            shield: false,
+        }
+    }
+
+    fn pure_monastery() -> TileSpec {
+        TileSpec {
+            edges: [EdgeKind::Field; 4],
+            segments: [0; 4],
+            monastery: true,
+            shield: false,
+        }
+    }
+
+    #[test]
+    fn closing_a_road_emits_scoring_event_and_returns_meeple() {
+        use crate::domain::scoring::FeatureKind;
+        let mut board = Board::new();
+        board.place((0, 0), PlacedTile::new(straight_road(), 0)).unwrap();
+        board.place_meeple_on_segment(Side::North, 1).unwrap();
+        // Cap south end with road_end rotation 0 (road on N) at (0, -1).
+        board.place((0, -1), PlacedTile::new(road_end(), 0)).unwrap();
+        // No closure yet (north of (0,0) still open).
+        assert!(board.resolve_scoring().is_empty());
+        // Cap north end at (0, 1) with road_end rotation 2 (road on S).
+        board.place((0, 1), PlacedTile::new(road_end(), 2)).unwrap();
+        let events = board.resolve_scoring();
+        assert_eq!(events.len(), 1);
+        let ev = &events[0];
+        assert_eq!(ev.kind, FeatureKind::Road);
+        assert_eq!(ev.points, 3); // 3 tiles
+        assert_eq!(ev.winners, vec![1]);
+        assert_eq!(ev.meeples_returned, vec![1]);
+    }
+
+    #[test]
+    fn cannot_place_meeple_on_segment_when_no_tile_placed() {
+        let mut board = Board::new();
+        let err = board.place_meeple_on_segment(Side::North, 1).unwrap_err();
+        assert_eq!(err, MeeplePlaceError::NoTileJustPlaced);
+    }
+
+    #[test]
+    fn cannot_place_meeple_on_monastery_when_tile_has_none() {
+        let mut board = Board::new();
+        board.place((0, 0), PlacedTile::new(straight_road(), 0)).unwrap();
+        let err = board.place_meeple_on_monastery(1).unwrap_err();
+        assert_eq!(err, MeeplePlaceError::NoMonasteryHere);
+    }
+
+    #[test]
+    fn monastery_neighbor_count_grows_as_tiles_placed_around() {
+        let mut board = Board::new();
+        board.place((0, 0), PlacedTile::new(pure_monastery(), 0)).unwrap();
+        board.place_meeple_on_monastery(1).unwrap();
+        assert_eq!(board.monastery((0, 0)).unwrap().neighbor_count, 0);
+        // Place a tile to the north (orthogonal neighbor).
+        board.place((0, 1), PlacedTile::new(pure_monastery(), 0)).unwrap();
+        assert_eq!(board.monastery((0, 0)).unwrap().neighbor_count, 1);
+        // Place a tile diagonally NE.
+        board.place((1, 1), PlacedTile::new(pure_monastery(), 0)).unwrap();
+        assert_eq!(board.monastery((0, 0)).unwrap().neighbor_count, 2);
+    }
+
+    #[test]
+    fn completed_monastery_scores_nine_points() {
+        use crate::domain::scoring::FeatureKind;
+        let mut board = Board::new();
+        // Surround (0,0) monastery with 8 field tiles.
+        board.place((0, 0), PlacedTile::new(pure_monastery(), 0)).unwrap();
+        board.place_meeple_on_monastery(2).unwrap();
+        let positions = [
+            (1, 0), (-1, 0), (0, 1), (0, -1),
+            (1, 1), (1, -1), (-1, 1), (-1, -1),
+        ];
+        for (i, p) in positions.iter().enumerate() {
+            board.place(*p, PlacedTile::new(all_field(), 0)).unwrap();
+            let events = board.resolve_scoring();
+            if i < 7 {
+                // Last placement (the 8th neighbor) triggers monastery completion.
+                assert!(
+                    events.iter().all(|e| e.kind != FeatureKind::Monastery),
+                    "monastery should not score until all 8 neighbors placed (i={i})"
+                );
+            } else {
+                let monastery_events: Vec<_> =
+                    events.iter().filter(|e| e.kind == FeatureKind::Monastery).collect();
+                assert_eq!(monastery_events.len(), 1);
+                assert_eq!(monastery_events[0].points, 9);
+                assert_eq!(monastery_events[0].winners, vec![2]);
+            }
+        }
     }
 }
