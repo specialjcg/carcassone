@@ -1,5 +1,6 @@
 pub mod board;
 pub mod feature;
+pub mod game;
 pub mod greedy;
 pub mod player;
 pub mod scoring;
