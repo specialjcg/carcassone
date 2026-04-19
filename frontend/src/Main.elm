@@ -7,8 +7,10 @@ import Html.Events exposing (onClick)
 import Http
 import Json.Decode as D exposing (Decoder)
 import Json.Encode as E
+import Set exposing (Set)
 import Svg exposing (Svg)
 import Svg.Attributes as SA
+import Svg.Events as SE
 
 
 
@@ -438,6 +440,7 @@ type alias GameState =
     , legalMoves : List GreedyMove
     , lastEvents : List ScoringEvent
     , busy : Bool
+    , selectedPos : Maybe Pos
     }
 
 
@@ -457,6 +460,8 @@ type Msg
     | ClickBotTurn
     | ClickPlayMove GreedyMove
     | ClickRestart
+    | ClickPos Pos
+    | ClickDeselect
 
 
 httpErrorToString : Http.Error -> String
@@ -488,6 +493,7 @@ update msg model =
                 , legalMoves = []
                 , lastEvents = []
                 , busy = False
+                , selectedPos = Nothing
                 }
             , fetchLegalMoves resp.gameId
             )
@@ -501,6 +507,7 @@ update msg model =
                     | view = resp.state
                     , lastEvents = resp.events
                     , busy = False
+                    , selectedPos = Nothing
                 }
             , if resp.finished then
                 Cmd.none
@@ -526,6 +533,12 @@ update msg model =
 
         ( ClickRestart, _ ) ->
             ( Loading, createGame 2 Nothing )
+
+        ( ClickPos pos, Playing gs ) ->
+            ( Playing { gs | selectedPos = Just pos }, Cmd.none )
+
+        ( ClickDeselect, Playing gs ) ->
+            ( Playing { gs | selectedPos = Nothing }, Cmd.none )
 
         _ ->
             ( model, Cmd.none )
@@ -564,7 +577,7 @@ viewGame gs =
         [ viewHeader gs
         , viewPlayers v
         , viewCurrentDraw v
-        , viewBoard v
+        , viewBoard gs
         , viewActions gs
         , viewEvents gs.lastEvents
         , viewLegalMoves gs
@@ -687,8 +700,12 @@ edgeChar e =
             "F"
 
 
-viewBoard : GameView -> Html Msg
-viewBoard v =
+viewBoard : GameState -> Html Msg
+viewBoard gs =
+    let
+        v =
+            gs.view
+    in
     div [ class "board" ]
         [ h2 []
             [ text
@@ -699,7 +716,7 @@ viewBoard v =
                     ++ " meeples"
                 )
             ]
-        , viewBoardSvg v.board
+        , viewBoardSvg v.board gs.legalMoves gs.selectedPos
         ]
 
 
@@ -712,55 +729,44 @@ tileSize =
     80
 
 
-type alias Bounds =
-    { minX : Int, maxX : Int, minY : Int, maxY : Int }
-
-
-computeBounds : List CellView -> Bounds
-computeBounds cells =
-    case cells of
-        [] ->
-            { minX = 0, maxX = 0, minY = 0, maxY = 0 }
-
-        first :: rest ->
-            let
-                ( fx, fy ) =
-                    first.pos
-
-                fold cell acc =
-                    let
-                        ( x, y ) =
-                            cell.pos
-                    in
-                    { minX = Basics.min acc.minX x
-                    , maxX = Basics.max acc.maxX x
-                    , minY = Basics.min acc.minY y
-                    , maxY = Basics.max acc.maxY y
-                    }
-            in
-            List.foldl fold { minX = fx, maxX = fx, minY = fy, maxY = fy } rest
-
-
-viewBoardSvg : BoardView -> Svg Msg
-viewBoardSvg board =
+viewBoardSvg : BoardView -> List GreedyMove -> Maybe Pos -> Svg Msg
+viewBoardSvg board legalMoves selectedPos =
     let
-        b =
-            computeBounds board.cells
+        ghosts =
+            uniqueLegalPositions legalMoves
+
+        allXs =
+            List.map Tuple.first (List.map .pos board.cells ++ ghosts)
+
+        allYs =
+            List.map Tuple.second (List.map .pos board.cells ++ ghosts)
+
+        minX =
+            List.minimum allXs |> Maybe.withDefault 0
+
+        maxX =
+            List.maximum allXs |> Maybe.withDefault 0
+
+        minY =
+            List.minimum allYs |> Maybe.withDefault 0
+
+        maxY =
+            List.maximum allYs |> Maybe.withDefault 0
 
         pad =
-            tileSize
+            tileSize // 2
 
         x0 =
-            b.minX * tileSize - pad
+            minX * tileSize - pad
 
         y0 =
-            -b.maxY * tileSize - pad
+            -maxY * tileSize - pad
 
         w =
-            (b.maxX - b.minX + 1) * tileSize + 2 * pad
+            (maxX - minX + 1) * tileSize + 2 * pad
 
         h =
-            (b.maxY - b.minY + 1) * tileSize + 2 * pad
+            (maxY - minY + 1) * tileSize + 2 * pad
 
         viewBoxStr =
             String.join " " (List.map String.fromInt [ x0, y0, w, h ])
@@ -768,11 +774,62 @@ viewBoardSvg board =
     Svg.svg
         [ SA.viewBox viewBoxStr
         , SA.width "800"
-        , SA.style "background:#0f1226;border-radius:6px;display:block"
+        , SA.style "background:#0f1226;border-radius:6px;display:block;max-width:100%"
         ]
         (List.map (viewCell board.lastPlaced) board.cells
             ++ List.map viewMeeple board.meeples
+            ++ List.map (viewLegalGhost selectedPos) ghosts
         )
+
+
+uniqueLegalPositions : List GreedyMove -> List Pos
+uniqueLegalPositions moves =
+    moves
+        |> List.map .pos
+        |> Set.fromList
+        |> Set.toList
+
+
+viewLegalGhost : Maybe Pos -> Pos -> Svg Msg
+viewLegalGhost selected pos =
+    let
+        ( x, y ) =
+            pos
+
+        tx =
+            x * tileSize
+
+        ty =
+            -y * tileSize
+
+        isSelected =
+            selected == Just pos
+    in
+    Svg.rect
+        [ SA.x (String.fromInt tx)
+        , SA.y (String.fromInt ty)
+        , SA.width "80"
+        , SA.height "80"
+        , SA.fill
+            (if isSelected then
+                "rgba(232,197,71,0.25)"
+
+             else
+                "rgba(255,255,255,0.04)"
+            )
+        , SA.stroke
+            (if isSelected then
+                "#e8c547"
+
+             else
+                "#888"
+            )
+        , SA.strokeDasharray "4 3"
+        , SA.strokeWidth "1.5"
+        , SA.style "cursor:pointer"
+        , SE.onClick (ClickPos pos)
+        ]
+        []
 
 
 viewCell : Maybe Pos -> CellView -> Svg Msg
@@ -1117,21 +1174,52 @@ featureKindLabel k =
 viewLegalMoves : GameState -> Html Msg
 viewLegalMoves gs =
     let
-        n =
-            List.length gs.legalMoves
+        filtered =
+            case gs.selectedPos of
+                Nothing ->
+                    gs.legalMoves
 
-        preview =
-            List.take 8 gs.legalMoves
+                Just sp ->
+                    List.filter (\m -> m.pos == sp) gs.legalMoves
+
+        n =
+            List.length filtered
+
+        ( shown, headerText ) =
+            case gs.selectedPos of
+                Nothing ->
+                    ( List.take 8 filtered
+                    , String.fromInt (List.length gs.legalMoves)
+                        ++ " legal moves — click a yellow ghost on the board to filter (or pick from first 8 below)"
+                    )
+
+                Just ( x, y ) ->
+                    ( filtered
+                    , String.fromInt n
+                        ++ " moves at ("
+                        ++ String.fromInt x
+                        ++ ", "
+                        ++ String.fromInt y
+                        ++ ")"
+                    )
+
+        controls =
+            case gs.selectedPos of
+                Just _ ->
+                    [ button [ onClick ClickDeselect ] [ text "Clear selection" ] ]
+
+                Nothing ->
+                    []
     in
-    if n == 0 then
+    if List.isEmpty gs.legalMoves then
         text ""
 
     else
         div [ class "legal" ]
-            [ h2 [] [ text (String.fromInt n ++ " legal moves (showing first 8)") ]
-            , ul []
-                (List.map (viewMoveButton gs.busy) preview)
-            ]
+            ([ h2 [] [ text headerText ] ]
+                ++ controls
+                ++ [ ul [] (List.map (viewMoveButton gs.busy) shown) ]
+            )
 
 
 viewMoveButton : Bool -> GreedyMove -> Html Msg
