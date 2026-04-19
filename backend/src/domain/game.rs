@@ -10,7 +10,7 @@ use crate::domain::scoring::ScoringEvent;
 use crate::domain::tile::{PlacedTile, TileSpec};
 use crate::domain::tile_set;
 
-pub type BotFn = Box<dyn Fn(&Board, &TileSpec, PlayerId, bool) -> Option<GreedyMove>>;
+pub type BotFn = Box<dyn FnMut(&Board, &TileSpec, PlayerId, bool) -> Option<GreedyMove>>;
 
 pub struct Game {
     pub board: Board,
@@ -45,7 +45,7 @@ impl Game {
 
     /// Play one turn for the current player. If a drawn tile has no legal placement,
     /// it is discarded and the next is drawn. Advances current_player at the end.
-    pub fn play_one_turn(&mut self, bot: &BotFn) -> Vec<ScoringEvent> {
+    pub fn play_one_turn(&mut self, bot: &mut BotFn) -> Vec<ScoringEvent> {
         let mut events = Vec::new();
         loop {
             let tile_spec = match self.bag.pop() {
@@ -86,11 +86,11 @@ impl Game {
         events
     }
 
-    pub fn play_full_game(&mut self, bots: &[BotFn]) {
+    pub fn play_full_game(&mut self, bots: &mut [BotFn]) {
         assert_eq!(bots.len(), self.players.len());
         while !self.is_over() {
-            let bot = &bots[self.current_player];
-            let _ = self.play_one_turn(bot);
+            let cp = self.current_player;
+            let _ = self.play_one_turn(&mut bots[cp]);
         }
         let endgame = self.board.endgame_scoring();
         self.apply_scoring(&endgame);
@@ -116,6 +116,15 @@ pub fn greedy_bot() -> BotFn {
     Box::new(|board, spec, pid, hm| crate::domain::greedy::choose_move(board, spec, pid, hm))
 }
 
+pub fn random_bot(seed: u64) -> BotFn {
+    let mut counter = seed;
+    Box::new(move |board, spec, pid, hm| {
+        let s = counter;
+        counter = counter.wrapping_add(1);
+        crate::domain::random::choose_move_seeded(board, spec, pid, hm, s)
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,12 +142,11 @@ mod tests {
     #[test]
     fn greedy_vs_greedy_terminates_with_valid_scores() {
         let mut game = Game::new(2, 7);
-        let bots: Vec<BotFn> = vec![greedy_bot(), greedy_bot()];
-        game.play_full_game(&bots);
+        let mut bots: Vec<BotFn> = vec![greedy_bot(), greedy_bot()];
+        game.play_full_game(&mut bots);
         assert!(game.is_over());
         let scores = game.final_scores();
         assert_eq!(scores.len(), 2);
-        // At least one player should have scored something.
         assert!(scores.iter().sum::<u32>() > 0);
     }
 
@@ -146,10 +154,10 @@ mod tests {
     fn same_seed_produces_identical_scores() {
         let mut g1 = Game::new(2, 123);
         let mut g2 = Game::new(2, 123);
-        let bots1: Vec<BotFn> = vec![greedy_bot(), greedy_bot()];
-        let bots2: Vec<BotFn> = vec![greedy_bot(), greedy_bot()];
-        g1.play_full_game(&bots1);
-        g2.play_full_game(&bots2);
+        let mut bots1: Vec<BotFn> = vec![greedy_bot(), greedy_bot()];
+        let mut bots2: Vec<BotFn> = vec![greedy_bot(), greedy_bot()];
+        g1.play_full_game(&mut bots1);
+        g2.play_full_game(&mut bots2);
         assert_eq!(g1.final_scores(), g2.final_scores());
     }
 
@@ -157,11 +165,10 @@ mod tests {
     fn different_seeds_produce_different_outcomes() {
         let mut g1 = Game::new(2, 1);
         let mut g2 = Game::new(2, 2);
-        let bots1: Vec<BotFn> = vec![greedy_bot(), greedy_bot()];
-        let bots2: Vec<BotFn> = vec![greedy_bot(), greedy_bot()];
-        g1.play_full_game(&bots1);
-        g2.play_full_game(&bots2);
-        // Not strictly guaranteed but extremely likely with 71-tile games.
+        let mut bots1: Vec<BotFn> = vec![greedy_bot(), greedy_bot()];
+        let mut bots2: Vec<BotFn> = vec![greedy_bot(), greedy_bot()];
+        g1.play_full_game(&mut bots1);
+        g2.play_full_game(&mut bots2);
         assert_ne!(g1.final_scores(), g2.final_scores());
     }
 }
