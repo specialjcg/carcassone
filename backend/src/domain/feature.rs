@@ -27,7 +27,7 @@ struct Node {
     info: FeatureInfo,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct FeatureGraph {
     nodes: HashMap<SegmentRef, Node>,
 }

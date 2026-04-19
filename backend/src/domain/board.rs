@@ -30,7 +30,7 @@ pub struct MonasteryRecord {
     pub neighbor_count: u8,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Board {
     tiles: HashMap<Pos, PlacedTile>,
     pub features: FeatureGraph,
@@ -199,6 +199,10 @@ impl Board {
 
     pub fn last_placed(&self) -> Option<Pos> {
         self.last_placed
+    }
+
+    pub fn positions(&self) -> impl Iterator<Item = Pos> + '_ {
+        self.tiles.keys().copied()
     }
 
     pub fn monastery(&self, pos: Pos) -> Option<&MonasteryRecord> {
