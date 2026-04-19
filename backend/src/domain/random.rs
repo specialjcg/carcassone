@@ -27,6 +27,10 @@ pub fn choose_move_with<R: Rng>(
     spec: &TileSpec,
     has_meeple: bool,
 ) -> Option<GreedyMove> {
+    enumerate_legal(board, spec, has_meeple).choose(rng).cloned()
+}
+
+pub fn enumerate_legal(board: &Board, spec: &TileSpec, has_meeple: bool) -> Vec<GreedyMove> {
     let mut legal: Vec<GreedyMove> = Vec::new();
     let candidates = candidate_positions(board);
     for pos in candidates {
@@ -58,7 +62,7 @@ pub fn choose_move_with<R: Rng>(
             }
         }
     }
-    legal.choose(rng).cloned()
+    legal
 }
 
 fn candidate_positions(board: &Board) -> Vec<Pos> {

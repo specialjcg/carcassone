@@ -26,6 +26,7 @@ pub struct GameView {
     pub current_player: u8,
     pub current_draw: Option<TileSpec>,
     pub is_over: bool,
+    pub finished: bool,
 }
 
 impl BoardView {
@@ -56,6 +57,7 @@ impl GameView {
             // The next tile drawn will be the LAST in the bag (Vec::pop semantics).
             current_draw: game.bag.last().cloned(),
             is_over: game.is_over(),
+            finished: game.finished,
         }
     }
 }

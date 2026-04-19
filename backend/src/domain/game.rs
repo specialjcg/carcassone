@@ -2,7 +2,7 @@ use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
 
-use crate::domain::board::Board;
+use crate::domain::board::{Board, PlacementError};
 use crate::domain::feature::PlayerId;
 use crate::domain::greedy::{GreedyMove, MeepleChoice};
 use crate::domain::player::Player;
@@ -19,6 +19,14 @@ pub struct Game {
     pub players: Vec<Player>,
     pub bag: Vec<TileSpec>,
     pub current_player: usize,
+    pub finished: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PlayMoveError {
+    BagEmpty,
+    GameFinished,
+    Placement(PlacementError),
 }
 
 impl Game {
@@ -38,7 +46,87 @@ impl Game {
             players: (0..num_players).map(Player::new).collect(),
             bag,
             current_player: 0,
+            finished: false,
         }
+    }
+
+    /// Drop tiles from the top of the bag until one is playable. Returns a reference
+    /// to that tile, or None if the bag is exhausted.
+    pub fn ensure_drawable(&mut self) -> Option<&TileSpec> {
+        while let Some(top) = self.bag.last().cloned() {
+            if self.is_playable(&top) {
+                return self.bag.last();
+            }
+            self.bag.pop();
+        }
+        None
+    }
+
+    fn is_playable(&self, spec: &TileSpec) -> bool {
+        let candidates: Vec<_> = if self.board.is_empty() {
+            vec![(0, 0)]
+        } else {
+            use crate::domain::board::offset;
+            use crate::domain::tile::Side;
+            use std::collections::HashSet;
+            let occ: HashSet<_> = self.board.positions().collect();
+            let mut out: HashSet<_> = HashSet::new();
+            for p in &occ {
+                for s in Side::all() {
+                    let np = offset(*p, s);
+                    if !occ.contains(&np) {
+                        out.insert(np);
+                    }
+                }
+            }
+            out.into_iter().collect()
+        };
+        candidates.iter().any(|&pos| {
+            (0..4u8).any(|rot| self.board.can_place(pos, &PlacedTile::new(spec.clone(), rot)).is_ok())
+        })
+    }
+
+    /// Apply an explicit move using the current top of the bag (the "drawn" tile).
+    /// Removes that tile from the bag, resolves scoring, advances the current player,
+    /// and auto-runs endgame when no playable tiles remain.
+    pub fn play_move(&mut self, mv: GreedyMove) -> Result<Vec<ScoringEvent>, PlayMoveError> {
+        if self.finished {
+            return Err(PlayMoveError::GameFinished);
+        }
+        let spec = self.bag.last().cloned().ok_or(PlayMoveError::BagEmpty)?;
+        let placed = PlacedTile::new(spec, mv.rotation);
+        self.board.place(mv.pos, placed).map_err(PlayMoveError::Placement)?;
+        let pid = self.current_player as PlayerId;
+        if let Some(choice) = mv.meeple.clone() {
+            let placed_ok = match choice {
+                MeepleChoice::Segment(s) => self.board.place_meeple_on_segment(s, pid).is_ok(),
+                MeepleChoice::Monastery => self.board.place_meeple_on_monastery(pid).is_ok(),
+            };
+            if placed_ok {
+                self.players[self.current_player].try_take_meeple();
+            }
+        }
+        self.bag.pop();
+        let mut events = self.board.resolve_scoring();
+        self.apply_scoring(&events);
+        self.current_player = (self.current_player + 1) % self.players.len();
+        self.ensure_drawable();
+        if self.bag.is_empty() && !self.finished {
+            let endgame = self.board.endgame_scoring();
+            self.apply_scoring(&endgame);
+            events.extend(endgame);
+            self.finished = true;
+        }
+        Ok(events)
+    }
+
+    /// Enumerate all legal moves for the current top of the bag (for the current player).
+    pub fn legal_moves(&self) -> Vec<GreedyMove> {
+        let Some(spec) = self.bag.last() else {
+            return Vec::new();
+        };
+        let has_meeple = self.players[self.current_player].meeples_remaining > 0;
+        crate::domain::random::enumerate_legal(&self.board, spec, has_meeple)
     }
 
     pub fn is_over(&self) -> bool {
@@ -131,8 +219,12 @@ impl Game {
     }
 
     pub fn finish(&mut self) {
+        if self.finished {
+            return;
+        }
         let endgame = self.board.endgame_scoring();
         self.apply_scoring(&endgame);
+        self.finished = true;
     }
 
     pub fn play_full_game(&mut self, bots: &mut [BotFn]) {
@@ -211,6 +303,39 @@ mod tests {
         g1.play_full_game(&mut bots1);
         g2.play_full_game(&mut bots2);
         assert_eq!(g1.final_scores(), g2.final_scores());
+    }
+
+    #[test]
+    fn play_move_advances_player_and_pops_bag() {
+        let mut game = Game::new(2, 5);
+        let before_bag = game.bag.len();
+        let mvs = game.legal_moves();
+        let mv = mvs.into_iter().next().expect("at least one legal move");
+        let _events = game.play_move(mv).unwrap();
+        assert_eq!(game.current_player, 1);
+        assert!(game.bag.len() < before_bag);
+    }
+
+    #[test]
+    fn play_move_rejects_after_finished() {
+        let mut game = Game::new(2, 9);
+        let mut bots: Vec<BotFn> = vec![greedy_bot(), greedy_bot()];
+        game.play_full_game(&mut bots);
+        assert!(game.finished);
+        let dummy = GreedyMove { pos: (10, 10), rotation: 0, meeple: None };
+        assert_eq!(game.play_move(dummy), Err(PlayMoveError::GameFinished));
+    }
+
+    #[test]
+    fn legal_moves_lists_at_least_one_for_fresh_game() {
+        let game = Game::new(2, 3);
+        assert!(!game.legal_moves().is_empty());
+    }
+
+    #[test]
+    fn ensure_drawable_returns_some_for_fresh_game() {
+        let mut game = Game::new(2, 4);
+        assert!(game.ensure_drawable().is_some());
     }
 
     #[test]
