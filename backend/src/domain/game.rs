@@ -11,6 +11,8 @@ use crate::domain::tile::{PlacedTile, TileSpec};
 use crate::domain::tile_set;
 
 pub type BotFn = Box<dyn FnMut(&Board, &TileSpec, PlayerId, bool) -> Option<GreedyMove>>;
+pub type OracleFn =
+    Box<dyn FnMut(&Board, &[TileSpec], PlayerId, bool) -> Option<(usize, GreedyMove)>>;
 
 pub struct Game {
     pub board: Board,
@@ -86,14 +88,60 @@ impl Game {
         events
     }
 
+    /// Free-choice variant: oracle picks any tile from the bag at each turn.
+    /// Skips the per-tile redraw loop because the oracle inspects the whole bag.
+    pub fn play_one_oracle_turn(&mut self, oracle: &mut OracleFn) -> Vec<ScoringEvent> {
+        let mut events = Vec::new();
+        if self.bag.is_empty() {
+            return events;
+        }
+        let pid = self.current_player as PlayerId;
+        let has_meeple = self.players[self.current_player].meeples_remaining > 0;
+        match oracle(&self.board, &self.bag, pid, has_meeple) {
+            Some((idx, m)) => {
+                let tile_spec = self.bag.remove(idx);
+                let placed = PlacedTile::new(tile_spec, m.rotation);
+                self.board
+                    .place(m.pos, placed)
+                    .expect("oracle returned an illegal move");
+                if let Some(choice) = m.meeple {
+                    let placed_ok = match choice {
+                        MeepleChoice::Segment(s) => {
+                            self.board.place_meeple_on_segment(s, pid).is_ok()
+                        }
+                        MeepleChoice::Monastery => {
+                            self.board.place_meeple_on_monastery(pid).is_ok()
+                        }
+                    };
+                    if placed_ok {
+                        self.players[self.current_player].try_take_meeple();
+                    }
+                }
+                let turn_events = self.board.resolve_scoring();
+                self.apply_scoring(&turn_events);
+                events.extend(turn_events);
+                self.current_player = (self.current_player + 1) % self.players.len();
+            }
+            None => {
+                // No tile in the bag has any legal placement. Drop one to make progress.
+                self.bag.pop();
+            }
+        }
+        events
+    }
+
+    pub fn finish(&mut self) {
+        let endgame = self.board.endgame_scoring();
+        self.apply_scoring(&endgame);
+    }
+
     pub fn play_full_game(&mut self, bots: &mut [BotFn]) {
         assert_eq!(bots.len(), self.players.len());
         while !self.is_over() {
             let cp = self.current_player;
             let _ = self.play_one_turn(&mut bots[cp]);
         }
-        let endgame = self.board.endgame_scoring();
-        self.apply_scoring(&endgame);
+        self.finish();
     }
 
     fn apply_scoring(&mut self, events: &[ScoringEvent]) {
@@ -123,6 +171,10 @@ pub fn random_bot(seed: u64) -> BotFn {
         counter = counter.wrapping_add(1);
         crate::domain::random::choose_move_seeded(board, spec, pid, hm, s)
     })
+}
+
+pub fn oracle_bot() -> OracleFn {
+    Box::new(|board, bag, pid, hm| crate::domain::oracle::choose_free_choice(board, bag, pid, hm))
 }
 
 #[cfg(test)]

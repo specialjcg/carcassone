@@ -2,7 +2,7 @@ use crate::domain::feature::PlayerId;
 
 pub const STARTING_MEEPLES: u8 = 7;
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct Player {
     pub id: PlayerId,
     pub score: u32,

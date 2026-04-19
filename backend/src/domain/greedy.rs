@@ -4,13 +4,13 @@ use crate::domain::board::{offset, Board, Pos};
 use crate::domain::feature::PlayerId;
 use crate::domain::tile::{PlacedTile, Side, TileSpec};
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum MeepleChoice {
     Segment(Side),
     Monastery,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct GreedyMove {
     pub pos: Pos,
     pub rotation: u8,
@@ -23,6 +23,15 @@ pub fn choose_move(
     player: PlayerId,
     has_meeple: bool,
 ) -> Option<GreedyMove> {
+    choose_move_with_score(board, spec, player, has_meeple).map(|(m, _)| m)
+}
+
+pub fn choose_move_with_score(
+    board: &Board,
+    spec: &TileSpec,
+    player: PlayerId,
+    has_meeple: bool,
+) -> Option<(GreedyMove, i32)> {
     let candidates = candidate_positions(board);
     let mut best: Option<(GreedyMove, i32, MoveKey)> = None;
     for pos in candidates {
@@ -56,7 +65,7 @@ pub fn choose_move(
             }
         }
     }
-    best.map(|(m, _, _)| m)
+    best.map(|(m, s, _)| (m, s))
 }
 
 type MoveKey = (Pos, u8, u8);

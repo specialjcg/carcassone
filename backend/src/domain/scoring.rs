@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use crate::domain::feature::{FeatureInfo, PlayerId};
 use crate::domain::tile::EdgeKind;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub enum FeatureKind {
     Road,
     City,
@@ -23,7 +23,7 @@ pub fn score_farm(adjacent_completed_cities: u32, meeples: &[PlayerId]) -> Optio
     })
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
 pub struct ScoringEvent {
     pub kind: FeatureKind,
     pub points: u32,

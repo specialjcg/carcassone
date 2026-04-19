@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::domain::feature::{FeatureGraph, MeepleError, PlayerId, SegmentRef};
+use crate::domain::greedy::MeepleChoice;
 use crate::domain::scoring::{
     score_completed_feature, score_completed_monastery, score_farm, score_incomplete_feature,
     score_incomplete_monastery, ScoringEvent,
@@ -30,11 +31,19 @@ pub struct MonasteryRecord {
     pub neighbor_count: u8,
 }
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct ActiveMeeple {
+    pub pos: Pos,
+    pub on: MeepleChoice,
+    pub owner: PlayerId,
+}
+
 #[derive(Debug, Default, Clone)]
 pub struct Board {
     tiles: HashMap<Pos, PlacedTile>,
     pub features: FeatureGraph,
     monasteries: HashMap<Pos, MonasteryRecord>,
+    meeples: Vec<ActiveMeeple>,
     last_placed: Option<Pos>,
 }
 
@@ -133,7 +142,13 @@ impl Board {
         let sid = tile.segment_id(side);
         self.features
             .place_meeple((pos, sid), owner)
-            .map_err(MeeplePlaceError::Feature)
+            .map_err(MeeplePlaceError::Feature)?;
+        self.meeples.push(ActiveMeeple {
+            pos,
+            on: MeepleChoice::Segment(side),
+            owner,
+        });
+        Ok(())
     }
 
     pub fn place_meeple_on_monastery(
@@ -149,7 +164,38 @@ impl Board {
             return Err(MeeplePlaceError::Feature(MeepleError::FeatureOccupied));
         }
         rec.owner = Some(owner);
+        self.meeples.push(ActiveMeeple {
+            pos,
+            on: MeepleChoice::Monastery,
+            owner,
+        });
         Ok(())
+    }
+
+    pub fn meeples(&self) -> &[ActiveMeeple] {
+        &self.meeples
+    }
+
+    fn prune_returned_meeples(&mut self) {
+        let mut keep: Vec<ActiveMeeple> = Vec::with_capacity(self.meeples.len());
+        for m in std::mem::take(&mut self.meeples) {
+            let still_active = match m.on {
+                MeepleChoice::Segment(side) => {
+                    let tile = self.tiles.get(&m.pos).expect("meeple's tile must exist");
+                    let sid = tile.segment_id(side);
+                    !self.features.info((m.pos, sid)).meeples.is_empty()
+                }
+                MeepleChoice::Monastery => self
+                    .monasteries
+                    .get(&m.pos)
+                    .map(|r| r.owner.is_some())
+                    .unwrap_or(false),
+            };
+            if still_active {
+                keep.push(m);
+            }
+        }
+        self.meeples = keep;
     }
 
     pub fn resolve_scoring(&mut self) -> Vec<ScoringEvent> {
@@ -194,6 +240,7 @@ impl Board {
             self.monasteries.get_mut(&mpos).unwrap().owner = None;
         }
 
+        self.prune_returned_meeples();
         events
     }
 
@@ -283,6 +330,7 @@ impl Board {
             }
         }
 
+        self.prune_returned_meeples();
         events
     }
 }
