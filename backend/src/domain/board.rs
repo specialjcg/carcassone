@@ -2,9 +2,10 @@ use std::collections::{HashMap, HashSet};
 
 use crate::domain::feature::{FeatureGraph, MeepleError, PlayerId, SegmentRef};
 use crate::domain::scoring::{
-    score_completed_feature, score_completed_monastery, ScoringEvent,
+    score_completed_feature, score_completed_monastery, score_farm, score_incomplete_feature,
+    score_incomplete_monastery, ScoringEvent,
 };
-use crate::domain::tile::{edges_match, PlacedTile, Side};
+use crate::domain::tile::{edges_match, EdgeKind, PlacedTile, Side};
 
 pub type Pos = (i32, i32);
 
@@ -202,6 +203,83 @@ impl Board {
 
     pub fn monastery(&self, pos: Pos) -> Option<&MonasteryRecord> {
         self.monasteries.get(&pos)
+    }
+
+    pub fn endgame_scoring(&mut self) -> Vec<ScoringEvent> {
+        let mut events = Vec::new();
+
+        // 1. Incomplete roads/cities with meeples.
+        let roots = self.features.roots();
+        for (root, info) in &roots {
+            if info.kind == EdgeKind::Field {
+                continue;
+            }
+            if info.open_count == 0 {
+                continue;
+            }
+            if let Some(ev) = score_incomplete_feature(info) {
+                self.features.collect_meeples(*root);
+                events.push(ev);
+            }
+        }
+
+        // 2. Incomplete monasteries.
+        let monastery_owners: Vec<(Pos, PlayerId, u8)> = self
+            .monasteries
+            .iter()
+            .filter_map(|(pos, rec)| rec.owner.map(|o| (*pos, o, rec.neighbor_count)))
+            .collect();
+        for (pos, owner, count) in monastery_owners {
+            events.push(score_incomplete_monastery(owner, count));
+            self.monasteries.get_mut(&pos).unwrap().owner = None;
+        }
+
+        // 3. Farms: for each owned field root, count adjacent COMPLETED city roots.
+        let mut field_to_cities: HashMap<SegmentRef, HashSet<SegmentRef>> = HashMap::new();
+        let positions: Vec<Pos> = self.tiles.keys().copied().collect();
+        for pos in positions {
+            let tile = self.tiles.get(&pos).unwrap().clone();
+            let mut field_segs = HashSet::new();
+            let mut city_segs = HashSet::new();
+            for side in Side::all() {
+                let sid = tile.segment_id(side);
+                match tile.edge(side) {
+                    EdgeKind::Field => {
+                        field_segs.insert(sid);
+                    }
+                    EdgeKind::City => {
+                        city_segs.insert(sid);
+                    }
+                    EdgeKind::Road => {}
+                }
+            }
+            for f in &field_segs {
+                let f_root = self.features.find((pos, *f));
+                for c in &city_segs {
+                    let c_root = self.features.find((pos, *c));
+                    field_to_cities.entry(f_root).or_default().insert(c_root);
+                }
+            }
+        }
+        for (f_root, c_roots) in field_to_cities {
+            let info = self.features.info(f_root);
+            if info.meeples.is_empty() {
+                continue;
+            }
+            let completed = c_roots
+                .iter()
+                .filter(|c| {
+                    let ci = self.features.info(**c);
+                    ci.kind == EdgeKind::City && ci.open_count == 0
+                })
+                .count() as u32;
+            if let Some(ev) = score_farm(completed, &info.meeples) {
+                self.features.collect_meeples(f_root);
+                events.push(ev);
+            }
+        }
+
+        events
     }
 }
 
@@ -404,6 +482,83 @@ mod tests {
         // Place a tile diagonally NE.
         board.place((1, 1), PlacedTile::new(pure_monastery(), 0)).unwrap();
         assert_eq!(board.monastery((0, 0)).unwrap().neighbor_count, 2);
+    }
+
+    #[test]
+    fn endgame_scores_incomplete_road_with_meeple() {
+        use crate::domain::scoring::FeatureKind;
+        let mut board = Board::new();
+        board.place((0, 0), PlacedTile::new(straight_road(), 0)).unwrap();
+        board.place_meeple_on_segment(Side::North, 1).unwrap();
+        let events = board.endgame_scoring();
+        let roads: Vec<_> = events.iter().filter(|e| e.kind == FeatureKind::Road).collect();
+        assert_eq!(roads.len(), 1);
+        assert_eq!(roads[0].points, 1);
+        assert_eq!(roads[0].winners, vec![1]);
+    }
+
+    #[test]
+    fn endgame_skips_incomplete_features_without_meeples() {
+        let mut board = Board::new();
+        board.place((0, 0), PlacedTile::new(straight_road(), 0)).unwrap();
+        let events = board.endgame_scoring();
+        assert!(events.is_empty());
+    }
+
+    #[test]
+    fn endgame_scores_incomplete_monastery() {
+        use crate::domain::scoring::FeatureKind;
+        let mut board = Board::new();
+        board.place((0, 0), PlacedTile::new(pure_monastery(), 0)).unwrap();
+        board.place_meeple_on_monastery(2).unwrap();
+        board.place((0, 1), PlacedTile::new(all_field(), 0)).unwrap();
+        board.place((0, -1), PlacedTile::new(all_field(), 0)).unwrap();
+        board.place((1, 0), PlacedTile::new(all_field(), 0)).unwrap();
+        let events = board.endgame_scoring();
+        let monastery: Vec<_> = events
+            .iter()
+            .filter(|e| e.kind == FeatureKind::Monastery)
+            .collect();
+        assert_eq!(monastery.len(), 1);
+        assert_eq!(monastery[0].points, 1 + 3);
+        assert_eq!(monastery[0].winners, vec![2]);
+    }
+
+    #[test]
+    fn endgame_farm_scores_three_per_adjacent_completed_city() {
+        use crate::domain::scoring::FeatureKind;
+        let mut board = Board::new();
+        // A: city on N, field on E/S/W. Meeple on field (south side).
+        board.place((0, 0), PlacedTile::new(city_on_north(), 0)).unwrap();
+        board.place_meeple_on_segment(Side::South, 1).unwrap();
+        let _ = board.resolve_scoring();
+        // B at (0,1): city_on_north rotation 2 → city on S. Closes the city.
+        board.place((0, 1), PlacedTile::new(city_on_north(), 2)).unwrap();
+        let immediate = board.resolve_scoring();
+        let cities: Vec<_> = immediate
+            .iter()
+            .filter(|e| e.kind == FeatureKind::City)
+            .collect();
+        assert_eq!(cities.len(), 1);
+        assert_eq!(cities[0].points, 4);
+        // Endgame: farm gets 3 pts for the 1 completed adjacent city.
+        let endgame = board.endgame_scoring();
+        let farms: Vec<_> = endgame.iter().filter(|e| e.kind == FeatureKind::Farm).collect();
+        assert_eq!(farms.len(), 1);
+        assert_eq!(farms[0].points, 3);
+        assert_eq!(farms[0].winners, vec![1]);
+    }
+
+    #[test]
+    fn endgame_farm_does_not_score_for_incomplete_city() {
+        use crate::domain::scoring::FeatureKind;
+        let mut board = Board::new();
+        board.place((0, 0), PlacedTile::new(city_on_north(), 0)).unwrap();
+        board.place_meeple_on_segment(Side::South, 1).unwrap();
+        // City on N is open (never capped). Endgame: farm sees no completed adjacent city.
+        let endgame = board.endgame_scoring();
+        let farms: Vec<_> = endgame.iter().filter(|e| e.kind == FeatureKind::Farm).collect();
+        assert!(farms.is_empty());
     }
 
     #[test]

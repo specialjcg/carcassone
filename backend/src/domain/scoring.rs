@@ -8,6 +8,19 @@ pub enum FeatureKind {
     Road,
     City,
     Monastery,
+    Farm,
+}
+
+pub fn score_farm(adjacent_completed_cities: u32, meeples: &[PlayerId]) -> Option<ScoringEvent> {
+    if meeples.is_empty() || adjacent_completed_cities == 0 {
+        return None;
+    }
+    Some(ScoringEvent {
+        kind: FeatureKind::Farm,
+        points: 3 * adjacent_completed_cities,
+        winners: majority_owners(meeples),
+        meeples_returned: meeples.to_vec(),
+    })
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -168,6 +181,24 @@ mod tests {
     fn incomplete_monastery_scores_one_plus_neighbors() {
         let event = score_incomplete_monastery(0, 5);
         assert_eq!(event.points, 6);
+    }
+
+    #[test]
+    fn farm_scores_three_per_adjacent_completed_city() {
+        let event = score_farm(2, &[1]).unwrap();
+        assert_eq!(event.kind, FeatureKind::Farm);
+        assert_eq!(event.points, 6);
+        assert_eq!(event.winners, vec![1]);
+    }
+
+    #[test]
+    fn farm_with_no_adjacent_city_does_not_score() {
+        assert!(score_farm(0, &[1]).is_none());
+    }
+
+    #[test]
+    fn farm_with_no_meeples_does_not_score() {
+        assert!(score_farm(2, &[]).is_none());
     }
 
     #[test]

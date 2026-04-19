@@ -155,6 +155,14 @@ impl FeatureGraph {
         let r = self.find(seg);
         std::mem::take(&mut self.nodes.get_mut(&r).unwrap().info.meeples)
     }
+
+    pub fn roots(&self) -> Vec<(SegmentRef, FeatureInfo)> {
+        self.nodes
+            .iter()
+            .filter(|(k, n)| **k == n.parent)
+            .map(|(k, n)| (*k, n.info.clone()))
+            .collect()
+    }
 }
 
 #[cfg(test)]
