@@ -1,30 +1,46 @@
 body {
-    font-family: system-ui, -apple-system, sans-serif;
-    background: #1a1a2e;
-    color: #e0e0e0;
+    font-family: "EB Garamond", Georgia, "Times New Roman", serif;
+    background: #2a1f12;
+    color: #e6d9bb;
     margin: 0;
     padding: 2rem;
     max-width: 1100px;
     margin-left: auto;
     margin-right: auto;
+    background-image:
+        linear-gradient(rgba(0,0,0,0.15), rgba(0,0,0,0.15)),
+        repeating-linear-gradient(
+            45deg,
+            transparent 0,
+            transparent 40px,
+            rgba(255,255,255,0.015) 40px,
+            rgba(255,255,255,0.015) 41px
+        );
 }
 
 h1 {
     color: #e8c547;
     margin-top: 0;
+    font-family: "EB Garamond", Georgia, serif;
+    font-weight: 600;
+    letter-spacing: 0.04em;
 }
 
 h2 {
-    color: #b8d8a8;
+    color: #c9b584;
+    font-family: "EB Garamond", Georgia, serif;
     font-size: 1.1rem;
+    font-weight: 600;
     margin-bottom: 0.4rem;
     margin-top: 1.2rem;
+    letter-spacing: 0.02em;
 }
 
 .header p {
     margin: 0;
-    opacity: 0.7;
-    font-family: monospace;
+    opacity: 0.65;
+    font-family: "Courier New", monospace;
+    font-size: 0.9rem;
 }
 
 .players ul,
@@ -36,13 +52,13 @@ h2 {
 }
 
 .players li {
-    font-family: monospace;
+    font-family: "Courier New", monospace;
     padding: 2px 0;
 }
 
 .draw p {
     margin: 4px 0;
-    opacity: 0.75;
+    opacity: 0.7;
 }
 
 .actions {
@@ -50,18 +66,20 @@ h2 {
 }
 
 button {
-    background: #2d2d4a;
-    color: #e0e0e0;
-    border: 1px solid #3d3d5a;
-    border-radius: 4px;
-    padding: 6px 12px;
-    font-size: 0.9rem;
+    background: #3a2d1a;
+    color: #e6d9bb;
+    border: 1px solid #5c3e1e;
+    border-radius: 3px;
+    padding: 6px 14px;
+    font-size: 0.95rem;
     cursor: pointer;
-    font-family: inherit;
+    font-family: "EB Garamond", Georgia, serif;
+    letter-spacing: 0.02em;
 }
 
 button:hover:not(:disabled) {
-    background: #3d3d5a;
+    background: #4a3a24;
+    border-color: #8b6b3e;
 }
 
 button:disabled {
@@ -74,7 +92,7 @@ button:disabled {
 }
 
 .legal button {
-    font-family: monospace;
+    font-family: "Courier New", monospace;
     font-size: 0.8rem;
     text-align: left;
     width: 100%;

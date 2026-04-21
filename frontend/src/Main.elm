@@ -774,7 +774,7 @@ viewBoardSvg board legalMoves selectedPos =
     Svg.svg
         [ SA.viewBox viewBoxStr
         , SA.width "800"
-        , SA.style "background:#0f1226;border-radius:6px;display:block;max-width:100%"
+        , SA.style "background:#d4c8a0;border:2px solid #5c3e1e;border-radius:4px;display:block;max-width:100%"
         ]
         (svgDefs
             :: List.map (viewCell board.lastPlaced) board.cells
@@ -786,26 +786,54 @@ viewBoardSvg board legalMoves selectedPos =
 svgDefs : Svg msg
 svgDefs =
     Svg.defs []
-        [ Svg.pattern
+        [ -- Field: aged cream paper with sparse olive stippling (like IGN fields)
+          Svg.pattern
             [ SA.id "fieldPattern"
             , SA.x "0", SA.y "0"
-            , SA.width "16", SA.height "16"
+            , SA.width "20", SA.height "20"
             , SA.patternUnits "userSpaceOnUse"
             ]
-            [ Svg.rect [ SA.width "16", SA.height "16", SA.fill "#a8cf7d" ] []
-            , Svg.circle [ SA.cx "4", SA.cy "5", SA.r "0.7", SA.fill "#7fb35a", SA.opacity "0.7" ] []
-            , Svg.circle [ SA.cx "12", SA.cy "10", SA.r "0.7", SA.fill "#7fb35a", SA.opacity "0.7" ] []
-            , Svg.circle [ SA.cx "8", SA.cy "13", SA.r "0.5", SA.fill "#6ba049", SA.opacity "0.6" ] []
+            [ Svg.rect [ SA.width "20", SA.height "20", SA.fill "#ede2c2" ] []
+            , Svg.circle [ SA.cx "4", SA.cy "6", SA.r "0.6", SA.fill "#7a8c5e", SA.opacity "0.55" ] []
+            , Svg.circle [ SA.cx "14", SA.cy "11", SA.r "0.6", SA.fill "#7a8c5e", SA.opacity "0.55" ] []
+            , Svg.circle [ SA.cx "9", SA.cy "16", SA.r "0.5", SA.fill "#6b7a4e", SA.opacity "0.5" ] []
+            , Svg.circle [ SA.cx "17", SA.cy "3", SA.r "0.5", SA.fill "#6b7a4e", SA.opacity "0.5" ] []
+            , Svg.circle [ SA.cx "1", SA.cy "14", SA.r "0.4", SA.fill "#7a8c5e", SA.opacity "0.4" ] []
             ]
-        , Svg.pattern
-            [ SA.id "cityPattern"
+        , -- City/stone: tan base with diagonal hatching in dark sepia (fortified wall)
+          Svg.pattern
+            [ SA.id "cityHatch"
             , SA.x "0", SA.y "0"
-            , SA.width "12", SA.height "12"
+            , SA.width "6", SA.height "6"
             , SA.patternUnits "userSpaceOnUse"
+            , SA.patternTransform "rotate(45)"
             ]
-            [ Svg.rect [ SA.width "12", SA.height "12", SA.fill "#d4b896" ] []
-            , Svg.rect [ SA.x "1", SA.y "1", SA.width "4", SA.height "4", SA.fill "#c2a276", SA.opacity "0.5" ] []
-            , Svg.rect [ SA.x "7", SA.y "7", SA.width "3", SA.height "3", SA.fill "#c2a276", SA.opacity "0.5" ] []
+            [ Svg.rect [ SA.width "6", SA.height "6", SA.fill "#c9a57a" ] []
+            , Svg.line
+                [ SA.x1 "0", SA.y1 "0", SA.x2 "0", SA.y2 "6"
+                , SA.stroke "#5c3e1e", SA.strokeWidth "0.6", SA.opacity "0.45"
+                ]
+                []
+            , Svg.line
+                [ SA.x1 "3", SA.y1 "0", SA.x2 "3", SA.y2 "6"
+                , SA.stroke "#5c3e1e", SA.strokeWidth "0.6", SA.opacity "0.45"
+                ]
+                []
+            ]
+        , -- Tiled roof hatch for monastery (dense diagonals on red clay)
+          Svg.pattern
+            [ SA.id "roofHatch"
+            , SA.x "0", SA.y "0"
+            , SA.width "3", SA.height "3"
+            , SA.patternUnits "userSpaceOnUse"
+            , SA.patternTransform "rotate(-30)"
+            ]
+            [ Svg.rect [ SA.width "3", SA.height "3", SA.fill "#a8413c" ] []
+            , Svg.line
+                [ SA.x1 "0", SA.y1 "0", SA.x2 "0", SA.y2 "3"
+                , SA.stroke "#5c2a28", SA.strokeWidth "0.5"
+                ]
+                []
             ]
         ]
 
@@ -840,20 +868,20 @@ viewLegalGhost selected pos =
         , SA.height "80"
         , SA.fill
             (if isSelected then
-                "rgba(232,197,71,0.25)"
+                "rgba(168,65,60,0.22)"
 
              else
-                "rgba(255,255,255,0.04)"
+                "rgba(92,62,30,0.08)"
             )
         , SA.stroke
             (if isSelected then
-                "#e8c547"
+                "#a8413c"
 
              else
-                "#888"
+                "#8b6b3e"
             )
         , SA.strokeDasharray "4 3"
-        , SA.strokeWidth "1.5"
+        , SA.strokeWidth "1.2"
         , SA.style "cursor:pointer"
         , SE.onClick (ClickPos pos)
         ]
@@ -919,17 +947,17 @@ renderTile pt isLast =
                 , SA.fill "none"
                 , SA.stroke
                     (if isLast then
-                        "#e8c547"
+                        "#c2884a"
 
                      else
-                        "#3a2f1a"
+                        "#5c3e1e"
                     )
                 , SA.strokeWidth
                     (if isLast then
-                        "3"
+                        "2.5"
 
                      else
-                        "1"
+                        "0.8"
                     )
                 ]
                 []
@@ -941,16 +969,14 @@ cityShapeFor : PlacedTile -> Side -> Maybe (Svg Msg)
 cityShapeFor pt side =
     if effectiveEdge pt side == City then
         Just
-            (Svg.g []
-                [ Svg.polygon
-                    [ SA.points (cityPolygonPoints side)
-                    , SA.fill "url(#cityPattern)"
-                    , SA.stroke "#5a3e1f"
-                    , SA.strokeWidth "1.5"
-                    , SA.strokeLinejoin "round"
-                    ]
-                    []
+            (Svg.polygon
+                [ SA.points (cityPolygonPoints side)
+                , SA.fill "url(#cityHatch)"
+                , SA.stroke "#5c3e1e"
+                , SA.strokeWidth "1.3"
+                , SA.strokeLinejoin "round"
                 ]
+                []
             )
 
     else
@@ -986,28 +1012,21 @@ roadShapeFor pt side =
             sy =
                 String.fromInt y1
         in
+        -- IGN-style double-line road: dark sepia banks framing a cream path.
         Just
             (Svg.g []
                 [ Svg.line
                     [ SA.x1 sx, SA.y1 sy, SA.x2 "40", SA.y2 "40"
-                    , SA.stroke "#8b6f47"
-                    , SA.strokeWidth "11"
+                    , SA.stroke "#5c3e1e"
+                    , SA.strokeWidth "8"
                     , SA.strokeLinecap "butt"
                     ]
                     []
                 , Svg.line
                     [ SA.x1 sx, SA.y1 sy, SA.x2 "40", SA.y2 "40"
-                    , SA.stroke "#cdb084"
-                    , SA.strokeWidth "9"
+                    , SA.stroke "#ede2c2"
+                    , SA.strokeWidth "5"
                     , SA.strokeLinecap "butt"
-                    ]
-                    []
-                , Svg.line
-                    [ SA.x1 sx, SA.y1 sy, SA.x2 "40", SA.y2 "40"
-                    , SA.stroke "#fff"
-                    , SA.strokeWidth "1"
-                    , SA.strokeDasharray "3 3"
-                    , SA.opacity "0.7"
                     ]
                     []
                 ]
@@ -1036,47 +1055,49 @@ edgeMidpoint side =
 monasteryShape : Svg Msg
 monasteryShape =
     Svg.g []
-        [ -- nave (church body)
+        [ -- Nave body (cream with sepia outline)
           Svg.rect
             [ SA.x "30", SA.y "40", SA.width "20", SA.height "16"
-            , SA.fill "#f4ead0", SA.stroke "#3a2f1a", SA.strokeWidth "1"
+            , SA.fill "#f5ead0", SA.stroke "#5c3e1e", SA.strokeWidth "0.8"
             ]
             []
-        , -- nave roof
+        , -- Nave roof with tile hatching
           Svg.polygon
             [ SA.points "28,40 40,30 52,40"
-            , SA.fill "#a83c2c", SA.stroke "#3a2f1a", SA.strokeWidth "1"
+            , SA.fill "url(#roofHatch)"
+            , SA.stroke "#5c3e1e", SA.strokeWidth "0.8"
             , SA.strokeLinejoin "round"
             ]
             []
-        , -- steeple
+        , -- Steeple body
           Svg.rect
             [ SA.x "37", SA.y "20", SA.width "6", SA.height "12"
-            , SA.fill "#f4ead0", SA.stroke "#3a2f1a", SA.strokeWidth "1"
+            , SA.fill "#f5ead0", SA.stroke "#5c3e1e", SA.strokeWidth "0.8"
             ]
             []
-        , -- steeple roof
+        , -- Steeple roof (hatched)
           Svg.polygon
             [ SA.points "35,22 40,14 45,22"
-            , SA.fill "#a83c2c", SA.stroke "#3a2f1a", SA.strokeWidth "1"
+            , SA.fill "url(#roofHatch)"
+            , SA.stroke "#5c3e1e", SA.strokeWidth "0.8"
             , SA.strokeLinejoin "round"
             ]
             []
-        , -- cross on top
+        , -- Cross
           Svg.line
-            [ SA.x1 "40", SA.y1 "10", SA.x2 "40", SA.y2 "16"
-            , SA.stroke "#3a2f1a", SA.strokeWidth "1.2"
+            [ SA.x1 "40", SA.y1 "10", SA.x2 "40", SA.y2 "15"
+            , SA.stroke "#5c3e1e", SA.strokeWidth "1.2"
             ]
             []
         , Svg.line
             [ SA.x1 "37", SA.y1 "12", SA.x2 "43", SA.y2 "12"
-            , SA.stroke "#3a2f1a", SA.strokeWidth "1.2"
+            , SA.stroke "#5c3e1e", SA.strokeWidth "1.2"
             ]
             []
-        , -- door
+        , -- Door
           Svg.rect
-            [ SA.x "37", SA.y "47", SA.width "6", SA.height "9"
-            , SA.fill "#5a3e1f"
+            [ SA.x "37", SA.y "48", SA.width "6", SA.height "8"
+            , SA.fill "#5c3e1e"
             ]
             []
         ]
@@ -1084,20 +1105,34 @@ monasteryShape =
 
 shieldShape : Svg Msg
 shieldShape =
-    -- Heraldic shield in NE corner: a rounded-top rectangle that tapers to a point.
+    -- Heraldic escutcheon in NE corner with horizontal hatching (old cartographic symbol)
     Svg.g []
         [ Svg.path
             [ SA.d "M56,8 L70,8 L70,18 Q70,24 63,26 Q56,24 56,18 Z"
-            , SA.fill "#c0392b"
+            , SA.fill "#a8413c"
             , SA.stroke "#3a1a0e"
-            , SA.strokeWidth "1"
+            , SA.strokeWidth "0.8"
             , SA.strokeLinejoin "round"
             ]
             []
-        , -- subtle highlight
-          Svg.line
-            [ SA.x1 "59", SA.y1 "11", SA.x2 "67", SA.y2 "11"
-            , SA.stroke "#e8634f", SA.strokeWidth "1.2", SA.opacity "0.6"
+        , Svg.line
+            [ SA.x1 "57", SA.y1 "12", SA.x2 "69", SA.y2 "12"
+            , SA.stroke "#5a221e", SA.strokeWidth "0.4", SA.opacity "0.8"
+            ]
+            []
+        , Svg.line
+            [ SA.x1 "57", SA.y1 "15", SA.x2 "69", SA.y2 "15"
+            , SA.stroke "#5a221e", SA.strokeWidth "0.4", SA.opacity "0.8"
+            ]
+            []
+        , Svg.line
+            [ SA.x1 "57", SA.y1 "18", SA.x2 "69", SA.y2 "18"
+            , SA.stroke "#5a221e", SA.strokeWidth "0.4", SA.opacity "0.8"
+            ]
+            []
+        , Svg.line
+            [ SA.x1 "58", SA.y1 "21", SA.x2 "68", SA.y2 "21"
+            , SA.stroke "#5a221e", SA.strokeWidth "0.4", SA.opacity "0.8"
             ]
             []
         ]
@@ -1138,13 +1173,13 @@ meepleSilhouette : String -> List (Svg Msg)
 meepleSilhouette color =
     [ Svg.circle
         [ SA.cx "0", SA.cy "-7", SA.r "3.5"
-        , SA.fill color, SA.stroke "#000", SA.strokeWidth "0.7"
+        , SA.fill color, SA.stroke "#3a2512", SA.strokeWidth "0.7"
         ]
         []
     , Svg.path
         [ SA.d "M-2,-3 L2,-3 L7,0 L7,4 L4,4 L2,9 L1,9 L0,5 L-1,9 L-2,9 L-4,4 L-7,4 L-7,0 Z"
         , SA.fill color
-        , SA.stroke "#000"
+        , SA.stroke "#3a2512"
         , SA.strokeWidth "0.7"
         , SA.strokeLinejoin "round"
         ]
